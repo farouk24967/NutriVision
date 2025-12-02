@@ -1,0 +1,7 @@
+{
+  "name": "Copy of NutriVision AI",
+  "description": "AI-powered nutrition tracking and meal planning application using computer vision and generative AI.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
