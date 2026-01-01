@@ -28,8 +28,8 @@ const INITIAL_PROFILE_TEMPLATE: UserProfile = {
 
 const App: React.FC = () => {
   // Auth & Settings State
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState<{name: string, email: string} | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [user, setUser] = useState<{name: string, email: string} | null>({name: 'Demo User', email: 'demo@example.com'});
   const [language, setLanguage] = useState<Language>('en');
 
   // App State

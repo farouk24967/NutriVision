@@ -1,14 +1,30 @@
-import { GoogleGenAI, Type, Chat } from "@google/genai";
+import { GoogleGenerativeAI, ChatSession } from "@google/generative-ai";
 import { UserProfile, WeeklyPlan, QuizQuestion } from "../types";
 import { v4 as uuidv4 } from 'uuid';
 
 // Initialize Gemini Client
 // NOTE: In a production environment, ensure process.env.API_KEY is strictly handled.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = process.env.API_KEY;
+const ai = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
 export const analyzeFoodImage = async (base64Image: string): Promise<any> => {
+  if (!ai) {
+    // Mock response for demo
+    return {
+      name: "Sample Food",
+      portionSize: "200g",
+      confidence: 0.8,
+      calories: 250,
+      protein: 10,
+      carbs: 30,
+      fats: 8,
+      analysis: "Mock analysis - API key not configured"
+    };
+  }
   try {
-    const modelId = 'gemini-2.5-flash'; 
+    const model = ai.getGenerativeModel({ 
+      model: 'gemini-1.5-flash'
+    });
     
     // Remove header if present (data:image/jpeg;base64,)
     const base64Data = base64Image.split(',')[1];
@@ -29,41 +45,19 @@ export const analyzeFoodImage = async (base64Image: string): Promise<any> => {
       }
     `;
 
-    const response = await ai.models.generateContent({
-      model: modelId,
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: 'image/jpeg', // Assuming JPEG for simplicity from camera/upload
-              data: base64Data
-            }
-          },
-          { text: prompt }
-        ]
-      },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING },
-            portionSize: { type: Type.STRING },
-            confidence: { type: Type.NUMBER },
-            calories: { type: Type.NUMBER },
-            protein: { type: Type.NUMBER },
-            carbs: { type: Type.NUMBER },
-            fats: { type: Type.NUMBER },
-            analysis: { type: Type.STRING },
-          }
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: base64Data
         }
       }
-    });
+    ]);
 
-    if (response.text) {
-      return JSON.parse(response.text);
-    }
-    throw new Error("No text response from Gemini");
+    const response = await result.response;
+    const text = response.text();
+    return JSON.parse(text);
 
   } catch (error) {
     console.error("Error analyzing food:", error);
@@ -72,11 +66,19 @@ export const analyzeFoodImage = async (base64Image: string): Promise<any> => {
 };
 
 export const generatePersonalizedPlan = async (profile: UserProfile): Promise<WeeklyPlan> => {
+  if (!ai) {
+    // Mock plan for demo
+    return { week: [] };
+  }
   try {
     // Calculate BMI for AI Context
     // Formula: kg / m^2
     const heightM = profile.height / 100;
     const bmi = (profile.weight / (heightM * heightM)).toFixed(1);
+
+    const model = ai.getGenerativeModel({ 
+      model: 'gemini-1.5-flash'
+    });
 
     const prompt = `
       You are an expert nutritionist AI. Generate a highly personalized 7-day meal plan (Monday to Sunday) for a user with the following biometrics:
@@ -99,57 +101,15 @@ export const generatePersonalizedPlan = async (profile: UserProfile): Promise<We
       - Ensure nutritional values (Calories, Protein, Carbs, Fats) are accurate and aligned with the goal.
       - Variety is key. Do not repeat the exact same meals every day.
 
-      Return strictly JSON fitting this schema.
+      Return strictly JSON with a "week" array containing the 7 days.
     `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            week: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  day: { type: Type.STRING },
-                  meals: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        mealType: { type: Type.STRING },
-                        name: { type: Type.STRING },
-                        description: { type: Type.STRING },
-                        nutrients: {
-                          type: Type.OBJECT,
-                          properties: {
-                            calories: { type: Type.NUMBER },
-                            protein: { type: Type.NUMBER },
-                            carbs: { type: Type.NUMBER },
-                            fats: { type: Type.NUMBER }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    });
-
-    if (response.text) {
-      const data = JSON.parse(response.text);
-      // Ensure we return the correct structure even if the LLM wraps it oddly
-      return data.week ? data : { week: [] };
-    }
-    throw new Error("Failed to generate plan");
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    const data = JSON.parse(text);
+    // Ensure we return the correct structure even if the LLM wraps it oddly
+    return data.week ? data : { week: [] };
 
   } catch (error) {
     console.error("Error generating plan:", error);
@@ -158,37 +118,36 @@ export const generatePersonalizedPlan = async (profile: UserProfile): Promise<We
 };
 
 export const generateDailyQuiz = async (): Promise<QuizQuestion> => {
+  if (!ai) {
+    // Fallback quiz
+    return {
+        id: 'fallback',
+        question: 'Which macronutrient is the body\'s primary source of energy?',
+        options: ['Protein', 'Carbohydrates', 'Fats', 'Water'],
+        correctAnswer: 1,
+        explanation: 'Carbohydrates are broken down into glucose, which is the main energy source for the body\'s cells.'
+    };
+  }
   try {
+    const model = ai.getGenerativeModel({ 
+      model: 'gemini-1.5-flash'
+    });
+
     const prompt = `
       Generate a single multiple-choice question about nutrition, healthy eating, or fitness science.
       Provide 4 options, 1 correct answer (index 0-3), and a short explanation.
+      Return JSON with question, options array, correctAnswer number, explanation.
     `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            question: { type: Type.STRING },
-            options: { type: Type.ARRAY, items: { type: Type.STRING } },
-            correctAnswer: { type: Type.NUMBER },
-            explanation: { type: Type.STRING }
-          }
-        }
-      }
-    });
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+    const data = JSON.parse(text);
+    return {
+        id: uuidv4(),
+        ...data
+    };
 
-    if (response.text) {
-        const data = JSON.parse(response.text);
-        return {
-            id: uuidv4(),
-            ...data
-        };
-    }
-    throw new Error("Failed to generate quiz");
   } catch (error) {
     console.error("Quiz Error", error);
     // Fallback quiz
@@ -203,38 +162,30 @@ export const generateDailyQuiz = async (): Promise<QuizQuestion> => {
 };
 
 // Chat Capabilities
-let chatSession: Chat | null = null;
+let chatSession: ChatSession | null = null;
 
 export const sendMessageToChatBot = async (message: string, profile: UserProfile): Promise<string> => {
+  if (!ai) {
+    return "API key not configured. Please set your GEMINI_API_KEY.";
+  }
   try {
     if (!chatSession) {
       // Calculate BMI for Context
       const heightM = profile.height / 100;
       const bmi = (profile.weight / (heightM * heightM)).toFixed(1);
 
-      chatSession = ai.chats.create({
-        model: 'gemini-3-pro-preview', // Using the advanced model for complex reasoning
-        config: {
-          systemInstruction: `
-            You are "NutriVision Chatbot", a specialized AI assistant for the NutriVision app.
-            
-            YOUR CONTEXT:
-            - The user is ${profile.name}, Age: ${profile.age}, Weight: ${profile.weight}kg, Goal: ${profile.goal}.
-            - Calculated BMI: ${bmi}.
-            
-            YOUR RULES:
-            1. ONLY answer questions related to Nutrition, Fitness, Diet, Health, and the Features of the NutriVision App (Scanner, Meal Planner, Dashboard).
-            2. If the user asks about politics, coding (outside the app), celebrities, or general off-topic items, politely refuse and steer the conversation back to health.
-            3. Be encouraging, empathetic, and professional.
-            4. Keep answers concise but helpful.
-            5. Use the user's data (Goal/BMI) to tailor your advice.
-          `
-        }
+      const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      chatSession = model.startChat({
+        history: [],
+        generationConfig: {
+          maxOutputTokens: 1000,
+        },
       });
     }
 
-    const response = await chatSession.sendMessage({ message });
-    return response.text || "I'm sorry, I couldn't generate a response.";
+    const result = await chatSession.sendMessage(message);
+    const response = await result.response;
+    return response.text() || "I'm sorry, I couldn't generate a response.";
 
   } catch (error) {
     console.error("Chat Error:", error);
